@@ -10,6 +10,24 @@
 #include <grp.h>
 #include <time.h>
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                                          //
+//                                      CShell - Clone of Linux Shell                                       //
+//                                                                                                          //
+//  - Developed a simple clone of linux shell in C language as a part of CS69201 - Computing Lab-I course   //
+//  - Supported commands                                                                                    //
+//      - ls (with options)                                                                                 //
+//      - cp                                                                                                //
+//      - cd                                                                                                //
+//      - touch                                                                                             //
+//      - cat                                                                                               //
+//      - pwd                                                                                               //
+//  - Piping of commands supported (Upto 2 commands)                                                        //
+//                                                                                                          //
+//                                                                                                          //
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 // Maximum length for a command
 #define MAXLEN 1024
 // Maximum number of arguments allowed for a command
@@ -29,6 +47,7 @@ void catPipe(char *args[], int countArgs);
 
 // static string to store present working directory
 static char *curDir;
+// Flag to check if pipe is present in command
 static int pipeFlag;
 
 // Command strings
@@ -47,6 +66,7 @@ const char *CMDNOTFOUND = "Command not found!!";
 const char *FILENOTFOUND = "File not found!!";
 const char *INVALIDCMDFORMAT = "Invalid command format!";
 
+// Print messages according to ERROR CODES
 void printError(int errorCode)
 {
     switch (errorCode)
@@ -67,6 +87,7 @@ void printError(int errorCode)
     }
 }
 
+// Initial prompt to display current working directory & hold for input
 void initialPrompt()
 {
     getcwd(curDir, MAXLEN);
@@ -74,6 +95,10 @@ void initialPrompt()
 }
 
 // Handler function to execute user input commands
+// Takes command arguments and number of arguments as input
+// Calls respective command handler functions
+// If command is not supported, calls anyCmdHandler function
+// anyCmdHandler function executes the command using execvp function
 void commandHandler(char *commandArgs[], int countArgs)
 {
     if (strcmp(commandArgs[0], LS) == 0)
@@ -96,10 +121,13 @@ void commandHandler(char *commandArgs[], int countArgs)
         anyCmdHandler(commandArgs, countArgs);
 }
 
+// Driver code for CShell
+// Takes user input commands and executes them
 int main(int argc, char *argv[])
 {
     // String to store current user input command
     char *command;
+    // Array of strings to store arguments of command
     char *commandArgs[ARGLEN];
     // Number of arguments in command
     int countArgs = 0;
@@ -115,6 +143,7 @@ int main(int argc, char *argv[])
         // get command from user
         fgets(command, MAXLEN, stdin);
 
+        // Check if pipe is present in command
         if (isSubstring(command, "|") == 1)
             pipeFlag = 1;
         else
@@ -126,6 +155,7 @@ int main(int argc, char *argv[])
         if (commandArgs[countArgs] == NULL)
             continue;
 
+        // Tokenizing the command
         while (commandArgs[countArgs] != NULL)
         {
             ++countArgs;
@@ -142,8 +172,15 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+// Any command handler function
+// Takes command arguments and number of arguments as input
+// Executes the command using execvp function
+// If command is not supported, prints error message
+// If command is supported, executes the command
+// Piped command is also supported upto 2 commands
 void anyCmdHandler(char *args[], int countArgs)
 {
+    // Forking child due to use of execvp function in future
     int pid = fork();
     if (pid == -1)
     {
@@ -152,12 +189,18 @@ void anyCmdHandler(char *args[], int countArgs)
     }
     else if (pid == 0)
     {
+        // If pipe is present in command
         if(pipeFlag==1)
         {
             int i=0;
+            // Find index of pipe symbol
             while(strcmp(args[i],"|")!=0) ++i;
+
+            // Create two arrays to store arguments of two commands
             char *args1[i];
             char *args2[countArgs-i-1];
+
+            // Store arguments of two commands in two arrays
             for(int j=0;j<i;++j)
                 args1[j] = args[j];
             for(int j=i+1;j<countArgs;++j)
@@ -172,9 +215,10 @@ void anyCmdHandler(char *args[], int countArgs)
             p1 = fork();
             if (p1 == 0)
             {
+                // Redirect STDOUT to fd[1] (i.e. write end of pipe)
                 close(fd[0]);
                 dup2(fd[1], 1);
-                // execlp(args1[0],args1[0],args1[1],NULL);
+                // Execute first command
                 execvp(args1[0],args1);
             }
 
@@ -182,8 +226,9 @@ void anyCmdHandler(char *args[], int countArgs)
             {
                 waitpid(p1, NULL, 0);
                 close(fd[1]);
+                // Redirect STDIN to fd[0] (i.e. read end of pipe)
                 dup2(fd[0], 0);
-                // execlp(args2[0],args2[0],args2[1],NULL);
+                // Execute second command
                 execvp(args2[0],args2);
             }
         }
@@ -191,29 +236,42 @@ void anyCmdHandler(char *args[], int countArgs)
         {
             printError(1);
         }
+        // Kill child process
         kill(getpid(), SIGTERM);
     }
     else
     {
+        // Wait for child process to terminate
         waitpid(pid, NULL, 0);
     }
 }
 
+
+// ls command handler function
+// Takes command arguments and number of arguments as input
+// Supports -l flag and piping with several command
 void lsHandler(char *args[], int countArgs)
 {
+    // struct dirent **dirlist: Stores list of directories and files
     struct dirent **dirlist;
+    // int dirCount: Stores number of directories and files
     int dirCount;
+
+    // Get list of directories and files
     dirCount = scandir(curDir, &dirlist, NULL, alphasort);
     if (dirCount < 0)
     {
         printf("No directories/files found!\n");
         return;
     }
+    // If pipe is present in command
     if (pipeFlag == 1)
     {
         int i = 0;
+        // Find index of pipe symbol
         while (strcmp(args[i], "|") != 0)
             ++i;
+        // Fork child process
         if (fork() == 0)
             lsPipe(curDir, args, i + 1);
         else
@@ -221,6 +279,7 @@ void lsHandler(char *args[], int countArgs)
     }
     else
     {
+        // If -l flag is present
         if (countArgs == 2 && strcmp(args[1], "-l") == 0)
         {
             while (dirCount--)
@@ -231,6 +290,7 @@ void lsHandler(char *args[], int countArgs)
         }
         else
         {
+            // Print list of directories and files
             while (dirCount--)
             {
                 printf("%s\t\t", dirlist[dirCount]->d_name);
@@ -241,6 +301,9 @@ void lsHandler(char *args[], int countArgs)
     }
 }
 
+// Piped ls command handler function
+// Takes directory name, command arguments and number of arguments as input
+// Executes the piped command using execvp function
 void lsPipe(char *dir, char *args[], int scIndex)
 {
     struct dirent **dirlist;
@@ -264,6 +327,7 @@ void lsPipe(char *dir, char *args[], int scIndex)
     {
         close(fd[0]);
         dup2(fd[1], 1);
+        // If -l flag is present
         if (strcmp(args[1], "-l") == 0)
         {
             while (dirCount--)
@@ -274,19 +338,18 @@ void lsPipe(char *dir, char *args[], int scIndex)
         }
         else
         {
-            // execlp("ls","ls",NULL);
             while (dirCount--)
             {
                 printf("%s\n", dirlist[dirCount]->d_name);
-                // puts(dirlist[dirCount]->d_name);
                 free(dirlist[dirCount]);
             }
             free(dirlist);
         }
+        // Kill child process
         kill(getpid(), SIGTERM);
     }
 
-    // Fork to run second command(more/sort) command which will get input from pipe
+    // Fork to run second command which will get input from pipe
     // By redirecting the STDIN of process in pipe using dup2()
     else
     {
@@ -297,10 +360,16 @@ void lsPipe(char *dir, char *args[], int scIndex)
     }
 }
 
+// ls -l command handler function
+// Takes directory name and directory entry structure as input
+// Prints the permission data, number of links, owner, group, size, time of last modification and file name
 void lsL(char *dir, struct dirent *dir_entr)
 {
+    // struct stat statbuf: Stores information about file
     struct stat statbuf;
+    // char fp[PATH_MAX]: Stores full path of file
     char fp[PATH_MAX];
+
     sprintf(fp, "%s/%s", dir, dir_entr->d_name);
     if (stat(fp, &statbuf) == -1)
     {
@@ -324,6 +393,7 @@ void lsL(char *dir, struct dirent *dir_entr)
     // group and user data
     struct passwd *pw;
     struct group *gid;
+    // gets user id
     pw = getpwuid(statbuf.st_uid);
     if (pw == NULL)
     {
@@ -358,6 +428,7 @@ void lsL(char *dir, struct dirent *dir_entr)
         perror("localtime");
         exit(EXIT_FAILURE);
     }
+    // convert struct tm to string
     strftime(outstr, sizeof(outstr), "%b %d %R", tmp);
     printf("%s ", outstr);
 
@@ -365,8 +436,13 @@ void lsL(char *dir, struct dirent *dir_entr)
     printf("%s\n", dir_entr->d_name);
 }
 
+
+// CD command handler function
+// Takes command arguments and number of arguments as input
+// Changes the current working directory
 void cdHandler(char *arg[], int countArgs)
 {
+    // If no arguments are passed, change to home directory
     if (countArgs == 1 || arg[1] == NULL)
     {
         chdir(getenv("HOME"));
@@ -380,6 +456,9 @@ void cdHandler(char *arg[], int countArgs)
     }
 }
 
+// touch command handler function
+// Takes command arguments and number of arguments as input
+// Creates a file with the given name
 void touchHandler(char *args[], int countArgs)
 {
     if (countArgs == 1 || args[1] == NULL)
@@ -388,8 +467,9 @@ void touchHandler(char *args[], int countArgs)
     }
     else
     {
+        // FILE *fptr: File pointer
         FILE *fptr;
-        printf("%s", args[1]);
+        // Open file in write mode
         fptr = fopen(args[1], "w");
         if (fptr == NULL)
         {
@@ -401,8 +481,16 @@ void touchHandler(char *args[], int countArgs)
     }
 }
 
+// cat command handler function
+// FORMAT: cat [filename] OR [> filename]
+// Takes command arguments and number of arguments as input
+// Prints the contents of the file
+// Create a new file
+// Piping the output of one command to another supported
+// PIPE FORMAT: cat [filename] | [command]
 void catHandler(char *args[], int countArgs)
 {
+    // Requires at least two arguments [cat filename]
     if (countArgs == 1 || args[1] == NULL)
     {
         printf("%s", INSUFFARGS);
@@ -411,9 +499,12 @@ void catHandler(char *args[], int countArgs)
     {
         printf("%s", INSUFFARGS);
     }
+    // Reading from file when two arguments are passed
     else if (countArgs == 2)
     {
+        // FILE *fptr: File pointer
         FILE *fptr;
+        // Open file in read mode
         fptr = fopen(args[1], "r");
         if (fptr == NULL)
         {
@@ -421,15 +512,20 @@ void catHandler(char *args[], int countArgs)
         }
         else
         {
+            // char buf[MAXLEN]: Stores the contents of the file
             char buf[MAXLEN];
+            // Read the file line by line
             while (fgets(buf, MAXLEN, fptr) != NULL)
                 puts(buf);
             fclose(fptr);
         }
     }
+    // Creating new file when three arguments are passed with ">" as second argument
     else if (countArgs == 3 && strcmp(args[1], ">") == 0)
     {
+        // FILE *fptr: File pointer
         FILE *fptr;
+        // Open file in write mode
         fptr = fopen(args[2], "w");
         if (fptr == NULL)
         {
@@ -437,13 +533,16 @@ void catHandler(char *args[], int countArgs)
         }
         else
         {
+            // char buf[MAXLEN]: Stores the contents of the file
             char buf[MAXLEN];
             memset(buf, '\0', MAXLEN);
             int i = 0;
+            // Read input from user until Ctrl+A is pressed
             char c = getchar();
             while (c != '\1')
             {
                 buf[i++] = c;
+                // Write to file when buffer is full
                 if (i >= MAXLEN - 1)
                 {
                     fputs(buf, fptr);
@@ -452,10 +551,12 @@ void catHandler(char *args[], int countArgs)
                 }
                 c = getchar();
             }
+            // Write remaining contents to file
             fputs(buf, fptr);
             fclose(fptr);
         }
     }
+    // Piping the output of one command to another
     else if (pipeFlag == 1)
     {
         if (fork() == 0)
@@ -469,6 +570,10 @@ void catHandler(char *args[], int countArgs)
     }
 }
 
+// Piped cat command handler function
+// FORMAT: cat [filename] | [command]
+// Takes command arguments and number of arguments as input
+// Piping the contents of file to another supported command
 void catPipe(char *args[], int countArgs)
 {
     // File descriptor for piped process
@@ -484,6 +589,7 @@ void catPipe(char *args[], int countArgs)
     if (p1 == 0)
     {
         close(fd[0]);
+        // Redirect STDOUT to pipe
         dup2(fd[1], 1);
         FILE *fptr;
         fptr = fopen(args[1], "r");
@@ -494,6 +600,7 @@ void catPipe(char *args[], int countArgs)
         else
         {
             char buf[MAXLEN];
+            // put content in pipe
             while (fgets(buf, MAXLEN, fptr) != NULL)
                 puts(buf);
             fclose(fptr);
@@ -507,28 +614,39 @@ void catPipe(char *args[], int countArgs)
     {
         wait(NULL);
         close(fd[1]);
+        // Redirect STDIN to pipe
         dup2(fd[0], 0);
+        // Execute second command
         execlp(args[3], args[3], args[4], NULL);
     }
 }
 
+// cp command handler function
+// FORMAT: cp [source] [destination]
+// Takes command arguments and number of arguments as input
 void cpHandler(char *args[], int countArgs)
 {
+    // Requires at least three arguments [cp source destination]
     if (countArgs < 3 || args[1] == NULL || args[2] == NULL)
     {
         printf("%s", INSUFFARGS);
     }
     else
     {
+        // char buf[MAXLEN]: Stores the contents of the file
         char buf[MAXLEN];
         FILE *inptr, *optr;
+        // Open source file in read mode
         inptr = fopen(args[1], "r");
+        // Open destination file in write mode
         optr = fopen(args[2], "w");
         if (inptr == NULL || optr == NULL)
             printError(2);
         else
         {
+            // Read the file line by line
             fgets(buf, MAXLEN, inptr);
+            // Write to file
             fputs(buf, optr);
             fclose(inptr);
             fclose(optr);
@@ -537,6 +655,8 @@ void cpHandler(char *args[], int countArgs)
     }
 }
 
+// Utility function to check if a string is a substring of another
+// Returns 1 if true, 0 otherwise
 int isSubstring(char *str, char *substr)
 {
     int i = 0, j = 0;
